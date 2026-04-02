@@ -1,0 +1,447 @@
+// Fresh AI — Meal Planner & Grocery Optimizer
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum DietaryRestriction {
+  glp1
+  high_bp
+  high_fiber
+  vegetarian
+  vegan
+  gluten_free
+  dairy_free
+  nut_free
+}
+
+enum Severity {
+  required
+  preferred
+}
+
+enum RecipeCategory {
+  breakfast
+  lunch
+  dinner
+  snack
+}
+
+enum RecipeSource {
+  ai_generated
+  user_added
+}
+
+enum MealPlanStatus {
+  draft
+  active
+  archived
+}
+
+enum MealType {
+  breakfast
+  lunch
+  dinner
+}
+
+enum GroceryListStatus {
+  pending
+  optimized
+  finalized
+}
+
+enum PriceSource {
+  kroger_api
+  ai_estimate
+  scraped
+  user_override
+}
+
+enum StoreChain {
+  kroger
+  walmart
+  sams_club
+  costco
+  local
+  other
+}
+
+// ─────────────────────────────────────────────
+// USERS & PROFILES
+// ─────────────────────────────────────────────
+
+model Profile {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  displayName     String?  @map("display_name")
+  zipCode         String?  @map("zip_code") @db.VarChar(10)
+  weeklyBudget    Decimal? @map("weekly_budget") @db.Decimal(10, 2)
+  isAdmin         Boolean  @default(false) @map("is_admin")
+  inviteCodeUsed  String?  @map("invite_code_used")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  dietaryRestrictions DietaryRestrictionEntry[]
+  userStores          UserStore[]
+  userFavoriteRecipes UserFavoriteRecipe[]
+  userStaples         UserStaple[]
+  mealPlans           MealPlan[]
+  groceryLists        GroceryList[]
+  priceFeedback       PriceFeedback[]
+  createdRecipes      Recipe[]
+  inviteCodesCreated  InviteCode[] @relation("InviteCodeCreator")
+  inviteCodesUsed     InviteCode[] @relation("InviteCodeUser")
+
+  @@map("profiles")
+}
+
+model DietaryRestrictionEntry {
+  id          String              @id @default(uuid())
+  profileId   String              @map("profile_id")
+  restriction DietaryRestriction
+  severity    Severity            @default(required)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, restriction])
+  @@map("dietary_restrictions")
+}
+
+model InviteCode {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  createdById String    @map("created_by")
+  usedById    String?   @map("used_by")
+  usedAt      DateTime? @map("used_at")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  createdBy Profile  @relation("InviteCodeCreator", fields: [createdById], references: [id])
+  usedBy    Profile? @relation("InviteCodeUser", fields: [usedById], references: [id])
+
+  @@map("invite_codes")
+}
+
+// ─────────────────────────────────────────────
+// STORES
+// ─────────────────────────────────────────────
+
+model Store {
+  id               String     @id @default(uuid())
+  name             String
+  chain            StoreChain @default(other)
+  address          String?
+  city             String?
+  state            String?
+  zipCode          String?    @map("zip_code") @db.VarChar(10)
+  lat              Decimal?   @db.Decimal(9, 6)
+  lng              Decimal?   @db.Decimal(9, 6)
+  krogerLocationId String?    @map("kroger_location_id")
+  placeId          String?    @map("place_id")
+  isBulkStore      Boolean    @default(false) @map("is_bulk_store")
+  createdAt        DateTime   @default(now()) @map("created_at")
+
+  userStores    UserStore[]
+  storeProducts StoreProduct[]
+  listItems     GroceryListItem[]
+
+  @@map("stores")
+}
+
+model UserStore {
+  id          String   @id @default(uuid())
+  profileId   String   @map("profile_id")
+  storeId     String   @map("store_id")
+  isPreferred Boolean  @default(true) @map("is_preferred")
+  isBulkStore Boolean  @default(false) @map("is_bulk_store")
+  priority    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, storeId])
+  @@map("user_stores")
+}
+
+// ─────────────────────────────────────────────
+// RECIPES
+// ─────────────────────────────────────────────
+
+model Recipe {
+  id           String         @id @default(uuid())
+  title        String
+  description  String?
+  category     RecipeCategory
+  prepTimeMins Int?           @map("prep_time_mins")
+  cookTimeMins Int?           @map("cook_time_mins")
+  servings     Int            @default(4)
+  instructions String[]
+  imageUrl     String?        @map("image_url")
+  source       RecipeSource   @default(ai_generated)
+  createdById  String?        @map("created_by")
+  isPublic     Boolean        @default(true) @map("is_public")
+  dietaryTags  String[]       @map("dietary_tags")
+  nutrition    Json?
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  createdBy           Profile?             @relation(fields: [createdById], references: [id])
+  ingredients         RecipeIngredient[]
+  userFavorites       UserFavoriteRecipe[]
+  mealPlanSlots       MealPlanSlot[]
+  mealPlanCandidates  MealPlanCandidate[]
+
+  @@index([category])
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id                  String  @id @default(uuid())
+  recipeId            String  @map("recipe_id")
+  ingredientName      String  @map("ingredient_name")
+  quantity            Decimal @db.Decimal(8, 3)
+  unit                String
+  preparation         String?
+  isOptional          Boolean @default(false) @map("is_optional")
+  substitutes         String[]
+  canonicalSearchTerm String? @map("canonical_search_term")
+
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@map("recipe_ingredients")
+}
+
+model UserFavoriteRecipe {
+  id        String   @id @default(uuid())
+  profileId String   @map("profile_id")
+  recipeId  String   @map("recipe_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  recipe  Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, recipeId])
+  @@map("user_favorite_recipes")
+}
+
+// ─────────────────────────────────────────────
+// STAPLES
+// ─────────────────────────────────────────────
+
+model StapleCategory {
+  id           String  @id @default(uuid())
+  name         String
+  displayOrder Int     @default(0) @map("display_order")
+
+  stapleItems StapleItem[]
+
+  @@map("staple_categories")
+}
+
+model StapleItem {
+  id                  String  @id @default(uuid())
+  categoryId          String  @map("category_id")
+  name                String
+  brand               String?
+  canonicalSearchTerm String? @map("canonical_search_term")
+  imageUrl            String? @map("image_url")
+  isSystemItem        Boolean @default(true) @map("is_system_item")
+
+  category    StapleCategory @relation(fields: [categoryId], references: [id])
+  userStaples UserStaple[]
+
+  @@map("staple_items")
+}
+
+model UserStaple {
+  id           String   @id @default(uuid())
+  profileId    String   @map("profile_id")
+  stapleItemId String?  @map("staple_item_id")
+  customName   String?  @map("custom_name")
+  quantity     Decimal? @db.Decimal(8, 3)
+  unit         String?
+  isRecurring  Boolean  @default(true) @map("is_recurring")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  profile     Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  stapleItem  StapleItem? @relation(fields: [stapleItemId], references: [id])
+
+  @@map("user_staples")
+}
+
+// ─────────────────────────────────────────────
+// MEAL PLANS
+// ─────────────────────────────────────────────
+
+model MealPlan {
+  id             String         @id @default(uuid())
+  profileId      String         @map("profile_id")
+  name           String
+  startDate      DateTime       @map("start_date") @db.Date
+  endDate        DateTime       @map("end_date") @db.Date
+  numDays        Int            @map("num_days")
+  status         MealPlanStatus @default(draft)
+  estimatedCost  Decimal?       @map("estimated_cost") @db.Decimal(10, 2)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  profile      Profile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  days         MealPlanDay[]
+  groceryLists GroceryList[]
+
+  @@map("meal_plans")
+}
+
+model MealPlanDay {
+  id         String   @id @default(uuid())
+  mealPlanId String   @map("meal_plan_id")
+  dayIndex   Int      @map("day_index")
+  planDate   DateTime @map("plan_date") @db.Date
+
+  mealPlan   MealPlan            @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  slots      MealPlanSlot[]
+  candidates MealPlanCandidate[]
+
+  @@map("meal_plan_days")
+}
+
+model MealPlanSlot {
+  id              String    @id @default(uuid())
+  mealPlanDayId   String    @map("meal_plan_day_id")
+  mealType        MealType  @map("meal_type")
+  recipeId        String?   @map("recipe_id")
+  isStapleMeal    Boolean   @default(false) @map("is_staple_meal")
+  servingsOverride Int?     @map("servings_override")
+
+  mealPlanDay MealPlanDay @relation(fields: [mealPlanDayId], references: [id], onDelete: Cascade)
+  recipe      Recipe?     @relation(fields: [recipeId], references: [id])
+
+  @@unique([mealPlanDayId, mealType])
+  @@map("meal_plan_slots")
+}
+
+model MealPlanCandidate {
+  id              String   @id @default(uuid())
+  mealPlanDayId   String   @map("meal_plan_day_id")
+  mealType        MealType @map("meal_type")
+  recipeId        String   @map("recipe_id")
+  candidateOrder  Int      @default(0) @map("candidate_order")
+
+  mealPlanDay MealPlanDay @relation(fields: [mealPlanDayId], references: [id], onDelete: Cascade)
+  recipe      Recipe      @relation(fields: [recipeId], references: [id])
+
+  @@map("meal_plan_candidates")
+}
+
+// ─────────────────────────────────────────────
+// GROCERY LISTS
+// ─────────────────────────────────────────────
+
+model GroceryList {
+  id                 String            @id @default(uuid())
+  mealPlanId         String            @map("meal_plan_id")
+  profileId          String            @map("profile_id")
+  status             GroceryListStatus @default(pending)
+  totalEstimatedCost Decimal?          @map("total_estimated_cost") @db.Decimal(10, 2)
+  isOverBudget       Boolean           @default(false) @map("is_over_budget")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  mealPlan MealPlan          @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  profile  Profile           @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  items    GroceryListItem[]
+
+  @@map("grocery_lists")
+}
+
+model GroceryListItem {
+  id               String      @id @default(uuid())
+  groceryListId    String      @map("grocery_list_id")
+  ingredientName   String      @map("ingredient_name")
+  totalQuantity    Decimal     @map("total_quantity") @db.Decimal(8, 3)
+  unit             String
+  sourceMeals      String[]    @map("source_meals")
+  storeId          String?     @map("store_id")
+  storeProductId   String?     @map("store_product_id")
+  purchaseQuantity Decimal?    @map("purchase_quantity") @db.Decimal(8, 3)
+  purchaseUnit     String?     @map("purchase_unit")
+  estimatedPrice   Decimal?    @map("estimated_price") @db.Decimal(8, 2)
+  priceSource      PriceSource @default(ai_estimate) @map("price_source")
+  isOnSale         Boolean     @default(false) @map("is_on_sale")
+  salePrice        Decimal?    @map("sale_price") @db.Decimal(8, 2)
+  isBulkSuggested  Boolean     @default(false) @map("is_bulk_suggested")
+  bulkConfirmed    Boolean?    @map("bulk_confirmed")
+  isCheckedOff     Boolean     @default(false) @map("is_checked_off")
+  userPriceFeedback Int?       @map("user_price_feedback")
+  priceLastFetched DateTime?   @map("price_last_fetched")
+
+  groceryList   GroceryList    @relation(fields: [groceryListId], references: [id], onDelete: Cascade)
+  store         Store?         @relation(fields: [storeId], references: [id])
+  storeProduct  StoreProduct?  @relation(fields: [storeProductId], references: [id])
+  priceFeedback PriceFeedback[]
+
+  @@index([groceryListId])
+  @@map("grocery_list_items")
+}
+
+// ─────────────────────────────────────────────
+// STORE PRODUCTS (cached lookups)
+// ─────────────────────────────────────────────
+
+model StoreProduct {
+  id               String      @id @default(uuid())
+  storeId          String      @map("store_id")
+  krogerProductId  String?     @map("kroger_product_id")
+  upc              String?
+  name             String
+  brand            String?
+  sizeDescription  String?     @map("size_description")
+  price            Decimal?    @db.Decimal(8, 2)
+  pricePerUnit     Decimal?    @map("price_per_unit") @db.Decimal(8, 4)
+  unitType         String?     @map("unit_type")
+  isOnSale         Boolean     @default(false) @map("is_on_sale")
+  salePrice        Decimal?    @map("sale_price") @db.Decimal(8, 2)
+  imageUrl         String?     @map("image_url")
+  category         String?
+  ingredientMatch  String?     @map("ingredient_match")
+  priceSource      PriceSource @default(kroger_api) @map("price_source")
+  lastFetchedAt    DateTime    @default(now()) @map("last_fetched_at")
+
+  store     Store             @relation(fields: [storeId], references: [id])
+  listItems GroceryListItem[]
+
+  @@index([ingredientMatch])
+  @@index([lastFetchedAt])
+  @@map("store_products")
+}
+
+// ─────────────────────────────────────────────
+// PRICE FEEDBACK
+// ─────────────────────────────────────────────
+
+model PriceFeedback {
+  id                 String   @id @default(uuid())
+  profileId          String   @map("profile_id")
+  groceryListItemId  String   @map("grocery_list_item_id")
+  ingredientName     String   @map("ingredient_name")
+  estimatedPrice     Decimal? @map("estimated_price") @db.Decimal(8, 2)
+  feedback           Int      // 1 = thumbs up, -1 = thumbs down
+  actualPrice        Decimal? @map("actual_price") @db.Decimal(8, 2)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  profile          Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  groceryListItem  GroceryListItem @relation(fields: [groceryListItemId], references: [id], onDelete: Cascade)
+
+  @@map("price_feedback")
+}
